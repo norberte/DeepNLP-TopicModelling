@@ -9,25 +9,9 @@ import scipy.stats as stats
 import matplotlib.pyplot as plt
 import logging
 from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.feature_extraction.text import TfidfTransforme
 
-def lda():
-    # seed
-    np.random.seed(2016)
-
-    # logger
-    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s',
-                        level=logging.INFO)
-    # import data-set
-    import csv
-    csvFile = open('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_data-set.csv', 'r')
-    reader = csv.reader(csvFile, delimiter=',', quotechar='"')
-    my_list = list(reader)
-    doc_set = []
-    for item in my_list:
-        doc_set.append(item[1])
-
-    # pre-processing
+def preprocessing(doc_set):
     lemmatizer = WordNetLemmatizer()  #lemmatizer
     #stops = stopwords.words('english') # weaker stopwords
     stops = get_stop_words('en')        # stronger stopwords
@@ -52,24 +36,50 @@ def lda():
             lemmatizer.lemmatize(word, get_wordnet_pos(tag[1]))
             for word, tag in zip(filtered_words, tags)
         )
+
     texts = []
     # loop through document list
-    with open('C:\Users\Norbert\Desktop\corpus.txt', 'w') as f:
-        f.truncate()
+    with open('C:\Users\Norbert\Desktop\sentenceCorpus.txt', 'w') as f:
         for line in doc_set:
             text = clean(line)
             f.write(text + '\n')
             texts.append(text)
+            #texts.append(clean(line))
+    return texts
+
+def lda():
+    # seed
+    np.random.seed(2016)
+
+    # logger
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+    # import data-set
+    import csv
+    csvFile = open('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_sentences.csv', 'r')
+    #csvFile = open('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_data-set.csv', 'r')
+    reader = csv.reader(csvFile, delimiter=',', quotechar='"')
+    my_list = list(reader)
+    doc_set = []
+    for item in my_list:
+        doc_set.append(item[1])
+
+    # pre-processing
+    data = preprocessing(doc_set)
+
+    MODELS_DIR = "C:\Users\Norbert\Desktop\work\Research 2016\LDA_Models"
+    import os
 
     # create dictionary
-    dictionary = corpora.Dictionary(line.lower().split() for line in open('C:\Users\Norbert\Desktop\corpus.txt', 'rb'))
+    dictionary = corpora.Dictionary(line.lower().split() for line in data)
     once_ids = [tokenid for tokenid, docfreq in dictionary.dfs.iteritems() if docfreq == 1]
     dictionary.filter_tokens(once_ids) # filter words that only appear once
     dictionary.filter_extremes(no_above=10, keep_n=100000)
     dictionary.compactify()
+    dictionary.save(os.path.join(MODELS_DIR, "airCanada.dict"))
 
     # convert tokenized documents into a document-term matrix
-    corpus = [dictionary.doc2bow(text.lower().split()) for text in texts]
+    corpus = [dictionary.doc2bow(text.lower().split()) for text in data]
+    corpora.MmCorpus.serialize(os.path.join(MODELS_DIR, "airCanada.mm"), corpus)
 
     ### new code
     #count = CountVectorizer()
@@ -78,21 +88,18 @@ def lda():
 
    # print(tfidf.fit_transform(count.fit_transform(texts)).toArray())
 
-
-
     KLvalues = []
     l = np.array([sum(cnt for _, cnt in doc) for doc in corpus])
 
     def sym_kl(p, q):
         return np.sum([stats.entropy(p, q), stats.entropy(q, p)])
 
-    def arun(corpus, dictionary, min_topics, max_topics, step):
+    def arun(corpus, dictionary, min_topics, max_topics, step, passes):
         kl = []
         flag = 0
         for i in range(min_topics, max_topics, step):
-            lda = models.LdaModel(corpus=corpus, id2word=dictionary, num_topics=i, passes = 5)
+            lda = models.LdaModel(corpus=corpus, id2word=dictionary, num_topics=i, passes=passes)
             m1 = lda.expElogbeta
-            print(m1)
             U, cm1, V = np.linalg.svd(m1)
             # Document-topic matrix
             lda_topics = lda[corpus]
@@ -103,15 +110,15 @@ def lda():
             cm2 = cm2 / cm2norm
             if flag > 0:
                 KLvalues.append(sym_kl(cm1, cm2))
-            flag+=1
+            flag += 1
             kl.append(sym_kl(cm1, cm2))
         return kl
 
     # estimate topic number according to Arun Rajkumar's research(2010)
-    kl = arun(corpus, dictionary, 1, 7, 1)
+    kl = arun(corpus=corpus, dictionary=dictionary,min_topics= 1,max_topics=10, step=1, passes= 20)
 
     # Plot kl divergence against number of topics
-    print()
+    print("KL Divergence Values")
     print(KLvalues)
     plt.plot(kl)
     plt.ylabel('Symmetric KL Divergence')
@@ -123,24 +130,33 @@ def lda():
     min_index, min_value = min(enumerate(KLvalues), key=operator.itemgetter(1))
     topicNum = min_index + 1
 
-    print()
-    print(topicNum)
-
     # generate LDA model
-    ldaModel = models.LdaModel(corpus=corpus, id2word=dictionary, num_topics=topicNum)
-    print(ldaModel.print_topics())
-    print()
+    #ldaModel = models.LdaModel(corpus=corpus, id2word=dictionary, num_topics=topicNum)
+    #print(ldaModel.print_topics())
+    #print()
     #print(ldaModel.get_document_topics(corpus, minimum_probability=None))
     #print()
     #print(ldaModel.top_topics(corpus))
+
+    #print("New")
+    #for i in ldaModel.show_topics(len(dictionary)):
+    #    print(i)
+
+    #hdp = models.HdpModel(corpus, id2word=dictionary)
+    #print("HDP")
+    #print(hdp.print_topics(topicNum))
+
+
+    # generate LDA model
 
     lsi = models.LsiModel(corpus, id2word=dictionary, num_topics=topicNum)
     print("LSI")
     print(lsi.print_topics(topicNum))
 
-    hdp = models.HdpModel(corpus, id2word=dictionary)
-    print("HDP")
-    print(hdp.print_topics(topicNum))
+    lsi.save(os.path.join(MODELS_DIR, "airCanada.lsi"))  # same for tfidf, lda, ...
+    #lsi = models.LsiModel.load('/tmp/model.lsi')
+
+
 
 
 def main():
