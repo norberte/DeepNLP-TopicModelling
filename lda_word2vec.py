@@ -1,99 +1,27 @@
 from __future__ import print_function
-from gensim import corpora, models, matutils
-from nltk.stem.wordnet import WordNetLemmatizer
-from nltk.corpus import wordnet, stopwords
-from stop_words import get_stop_words
+from __future__ import division
+from gensim import corpora, models, matutils, summarization
 import re, nltk
 import numpy as np
+from nltk.corpus import wordnet
 import scipy.stats as stats
+from text_processing import text_pre_processing
+from text_processing import remove_non_ascii
 import matplotlib.pyplot as plt
 import logging
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfTransforme
+from word2vec import getSimilar_for_Topics, getSimilar_for_Words, getDoc2VecModel, getWord2VecModel
 
-def preprocessing(doc_set):
-    lemmatizer = WordNetLemmatizer()  #lemmatizer
-    #stops = stopwords.words('english') # weaker stopwords
-    stops = get_stop_words('en')        # stronger stopwords
+tag_to_type = {'J': wordnet.ADJ, 'V': wordnet.VERB, 'R': wordnet.ADV}
 
-    tag_to_type = {'J': wordnet.ADJ, 'V': wordnet.VERB, 'R': wordnet.ADV}  # POS tagger
-    noNum = re.compile(r'[^a-zA-Z ]')     # number and punctuation remover
-    shortword = re.compile(r'\W*\b\w{1,2}\b')       # short word remover (1-2 letters)
-
-    # function that returns only the nouns
-    def get_wordnet_pos(treebank_tag):
-        return tag_to_type.get(treebank_tag[:1], wordnet.NOUN)
-
-    # text cleaning function
-    def clean(text):
-        text.replace("air canada", "aircanada")
-        text.replace("Air Canada", "aircanada")
-        clean_text = noNum.sub('', text)
-        words = nltk.word_tokenize(shortword.sub('', clean_text.lower()))
-        filtered_words = [w for w in words if not w in stops]
-        tags = nltk.pos_tag(filtered_words)
-        return ' '.join(
-            lemmatizer.lemmatize(word, get_wordnet_pos(tag[1]))
-            for word, tag in zip(filtered_words, tags)
-        )
-
-    texts = []
-    # loop through document list
-    with open('C:\Users\Norbert\Desktop\sentenceCorpus.txt', 'w') as f:
-        for line in doc_set:
-            text = clean(line)
-            f.write(text + '\n')
-            texts.append(text)
-            #texts.append(clean(line))
-    return texts
-
-def lda():
-    # seed
-    np.random.seed(2016)
-
-    # logger
-    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
-    # import data-set
-    import csv
-    csvFile = open('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_sentences.csv', 'r')
-    #csvFile = open('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_data-set.csv', 'r')
-    reader = csv.reader(csvFile, delimiter=',', quotechar='"')
-    my_list = list(reader)
-    doc_set = []
-    for item in my_list:
-        doc_set.append(item[1])
-
-    # pre-processing
-    data = preprocessing(doc_set)
-
-    MODELS_DIR = "C:\Users\Norbert\Desktop\work\Research 2016\LDA_Models"
-    import os
-
-    # create dictionary
-    dictionary = corpora.Dictionary(line.lower().split() for line in data)
-    once_ids = [tokenid for tokenid, docfreq in dictionary.dfs.iteritems() if docfreq == 1]
-    dictionary.filter_tokens(once_ids) # filter words that only appear once
-    dictionary.filter_extremes(no_above=10, keep_n=100000)
-    dictionary.compactify()
-    dictionary.save(os.path.join(MODELS_DIR, "airCanada.dict"))
-
-    # convert tokenized documents into a document-term matrix
-    corpus = [dictionary.doc2bow(text.lower().split()) for text in data]
-    corpora.MmCorpus.serialize(os.path.join(MODELS_DIR, "airCanada.mm"), corpus)
-
-    ### new code
-    #count = CountVectorizer()
-    #tfidf = TfidfTransformer()
-    #np.set_printoptions(precision=2)
-
-   # print(tfidf.fit_transform(count.fit_transform(texts)).toArray())
-
-    KLvalues = []
+def klDivergence(corpus, dictionary):
+    KLvalues = []  # Kullback - Leibler divergence values
     l = np.array([sum(cnt for _, cnt in doc) for doc in corpus])
 
+    # entropy calculation for the optimizer function
     def sym_kl(p, q):
         return np.sum([stats.entropy(p, q), stats.entropy(q, p)])
 
+    # function that optimizes the topicNum parameter
     def arun(corpus, dictionary, min_topics, max_topics, step, passes):
         kl = []
         flag = 0
@@ -115,51 +43,191 @@ def lda():
         return kl
 
     # estimate topic number according to Arun Rajkumar's research(2010)
-    kl = arun(corpus=corpus, dictionary=dictionary,min_topics= 1,max_topics=10, step=1, passes= 20)
-
-    # Plot kl divergence against number of topics
-    print("KL Divergence Values")
+    kl = arun(corpus=corpus, dictionary=dictionary, min_topics=1, max_topics=10, step=1, passes=20)
+    print("KL values")
     print(KLvalues)
+    # Plot kl divergence against number of topics
     plt.plot(kl)
     plt.ylabel('Symmetric KL Divergence')
     plt.xlabel('Number of Topics')
     plt.savefig('C:\Users\Norbert\Desktop\ldaKlDivergence.png', bbox_inches='tight')
+    return KLvalues
 
-    # find the proper parameter (minimize KL divergence value)
+def createDictionary(data):
+    dictionary = corpora.Dictionary(line.split() for line in data)
+    once_ids = [tokenid for tokenid, docfreq in dictionary.dfs.iteritems() if docfreq == 1]
+    dictionary.filter_tokens(once_ids)  # filter words that only appear once
+    dictionary.filter_extremes(keep_n=100000)
+    dictionary.compactify()
+    return dictionary
+
+def get_wordnet_pos(treebank_tag, pos):
+    return tag_to_type.get(treebank_tag[:1], pos)
+
+def word_analysis(text, words):
+    tokens = nltk.word_tokenize(text)
+    docs = nltk.Text(tokens)
+    #### do something with the so-far-unidentified-collocations
+    #docs.collocations()
+
+    w = words.split()
+    for word in w:
+        similar_words = docs.similar(word)
+        tags = nltk.pos_tag(list(similar_words))
+        print(similar_words)
+
+        adjectives = get_wordnet_pos(tags[1], wordnet.ADJ)
+        nouns = get_wordnet_pos(tags[1], wordnet.NOUN)
+        adverbs = get_wordnet_pos(tags[1], wordnet.ADV)
+        verbs = get_wordnet_pos(tags[1], wordnet.VERB)
+
+        print("WORD")
+        print(word)
+        print("Adjectives")
+        print(adjectives)
+        print("Nouns")
+        print(nouns)
+        print("Adverbs")
+        print(adverbs)
+        print("Verbs")
+        print(verbs)
+        print()
+
+def keywordFiltration(text, topicWords):
+    text = text.replace("  ", " ")
+    textWordCount = len(re.findall(r'\w+', text))
+    topicWordCount = len(re.findall(r'\w+', topicWords))
+    ratio = round((topicWordCount / textWordCount), 5) * 100
+    keywords = summarization.keywords(text = text,ratio = 0.1, pos_filter='NN',lemmatize=True)
+
+    topicList = topicWords.split()
+    keywordList = keywords.split()
+
+    crossRefList = []
+    [crossRefList.append(x) for x in topicList if x in keywordList]
+    return crossRefList
+
+def unique_list(l):
+    ulist = []
+    [ulist.append(x) for x in l if x not in ulist]
+    return ulist
+
+def getUniqueTopicWords(lsi, topicNum, wordNum):
+    topics = lsi.show_topics(num_topics=topicNum, num_words=wordNum, formatted=True)
+    coefficients, topicText = zip(*topics)
+
+    topicTerms = []
+    biGramFilter = re.compile(r'[0-9\+\-\*\.\"\']')
+    for line in topicText:
+        topicTerms.append(biGramFilter.sub('', line))
+
+    topicWords = ' '.join(topicTerms)
+    uniqueTopicWords = ' '.join(unique_list(topicWords.split()))
+    return uniqueTopicWords
+
+# find the proper parameter (minimize KL divergence value)
+def getMinimum(KLvalues):
     import operator
     min_index, min_value = min(enumerate(KLvalues), key=operator.itemgetter(1))
     topicNum = min_index + 1
+    return topicNum
 
-    # generate LDA model
-    #ldaModel = models.LdaModel(corpus=corpus, id2word=dictionary, num_topics=topicNum)
-    #print(ldaModel.print_topics())
-    #print()
-    #print(ldaModel.get_document_topics(corpus, minimum_probability=None))
-    #print()
-    #print(ldaModel.top_topics(corpus))
+def topic_analysis():
+    MODELS_DIR = 'C:\\Users\\Norbert\\Desktop\\work\\Research 2016\\LDA_Models\\'
+    DATA_DIR = 'C:\\Users\\Norbert\\Desktop\\newer data\\'
 
-    #print("New")
-    #for i in ldaModel.show_topics(len(dictionary)):
-    #    print(i)
+    import os
+    np.random.seed(2016)    # seed
+    logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)    # logger
 
-    #hdp = models.HdpModel(corpus, id2word=dictionary)
-    #print("HDP")
-    #print(hdp.print_topics(topicNum))
+    ############## pre-processing ##################################################
+    #sentences = text_pre_processing('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_sentences.csv')
+    docs = text_pre_processing('C:\Users\Norbert\Desktop\work\Research 2016\Data sets\Air_Canada_data-set.csv')
+
+    ############# create dictionary ################################################
+    #sentDictionary = createDictionary(sentences)
+    #sentDictionary.save(os.path.join(MODELS_DIR, "sentencesAirCanada.dict"))
+
+    docsDictionary = createDictionary(docs)
+    docsDictionary.save(os.path.join(MODELS_DIR, "docsAirCanada.dict"))
+
+    ############# corpus creation ##################################################
+    # convert tokenized documents into a document-term matrix
+    #sentCorpus = [sentDictionary.doc2bow(text.lower().split()) for text in sentences]
+    #corpora.MmCorpus.serialize(os.path.join(MODELS_DIR, "sentencesAirCanada.mm"), sentCorpus)
+
+    docsCorpus = [docsDictionary.doc2bow(text.lower().split()) for text in docs]
+    corpora.MmCorpus.serialize(os.path.join(MODELS_DIR, "docsAirCanada.mm"), docsCorpus)
+
+    ########### Number of Topics Estimation ########################################
+    # estimate topic number according to Arun Rajkumar's research(2010)
+    #KLvalues = klDivergence(docsCorpus, docsDictionary)
+    #topicNum = getMinimum(KLvalues)
+    topicNum = 6
+
+    ############# LSI Topic Model ####################################################
+    #lsi = models.LsiModel(sentCorpus, id2word=sentDictionary, num_topics=topicNum)
+    #print("SENTENCES LSI w/ 6 topics")
+    #print(lsi.print_topics(topicNum))
+
+    docsLSI = models.LsiModel(docsCorpus, id2word=docsDictionary, num_topics=topicNum)
+    print("DOCS LSI w/ 6 topics")
+    print(docsLSI.print_topics(topicNum))
+
+    ########## unique keywords & filtration of keywords ##############################
+    #sentencesTopicWords = getUniqueTopicWords(lsi, topicNum, 10)
+    #sentencesAllWords = ' '.join(sentences)
+    #finalSentenceTopicTerms = keywordFiltration(sentencesAllWords,sentencesTopicWords)
+    #crossRefSentenceTopicWords = str(' '.join(finalSentenceTopicTerms))
+
+    docsTopicWords = getUniqueTopicWords(docsLSI, topicNum, 10)
+    docsAllWords = ' '.join(docs)
+    finalDocsTopicTerms = keywordFiltration(docsAllWords, docsTopicWords)
+    crossRefDocsTopicWords = str(' '.join(finalDocsTopicTerms))
+
+    print("DOC Topic Words", docsTopicWords)
+    print()
+    print("Topic Words after filtration", crossRefDocsTopicWords)
+
+    ############## model creations #####################################################
+    #corpusPath = os.path.join(DATA_DIR, "corpus.txt")
+    #doc2vec = getDoc2VecModel(filePath = corpusPath, dim = 100, min = 5)
+    #doc2vec.save(os.path.join(MODELS_DIR, "docsAirCanada.doc2vec")) #save model
+    #word2vec = getWord2VecModel(filePath = corpusPath, dim=100, min=5)
+    #word2vec.save(os.path.join(MODELS_DIR, "docsAirCanada.word2vec"))  # save model
 
 
-    # generate LDA model
+    DATA_DIR = 'C:\\Users\\Norbert\\Desktop\\super new data\\'
+    corpusPath = 'C:\\Users\\Norbert\\Desktop\\newer data\\corpus.txt'
+    ############### doc2vec ###########################################################
+    doc2vec = models.Doc2Vec.load(os.path.join(MODELS_DIR, "airCanada_allPreProcessedWords.doc2vec"))
+    word2vec = models.Word2Vec.load(os.path.join(MODELS_DIR, "airCanada_allPreProcessedWords.word2vec"))
 
-    lsi = models.LsiModel(corpus, id2word=dictionary, num_topics=topicNum)
-    print("LSI")
-    print(lsi.print_topics(topicNum))
+    saveFileTo = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Doc2Vec_Words.csv")
+    logFile = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Doc2Vec_Words.txt")
+    getSimilar_for_Words(model = doc2vec,docsTopicWords = docsTopicWords, filePath = saveFileTo, logFile = logFile)
 
-    lsi.save(os.path.join(MODELS_DIR, "airCanada.lsi"))  # same for tfidf, lda, ...
+    saveFileTo = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Doc2Vec_Topics.csv")
+    logFile = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Doc2Vec_Topics.txt")
+    getSimilar_for_Topics(model = doc2vec, topicNumber = topicNum, topicModel = docsLSI, filePath = saveFileTo, logFile = logFile)
+
+    ############### word2vec #########################################################
+    saveFileTo = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Word2Vec_Words.csv")
+    logFile = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Word2Vec_Words.txt")
+    getSimilar_for_Words(model = word2vec,docsTopicWords = docsTopicWords, filePath  = saveFileTo, logFile=logFile)
+
+    saveFileTo = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Word2Vec_Topics.csv")
+    logFile = os.path.join(DATA_DIR, "airCanada_allPreProcessed_Word2Vec_Topics.txt")
+    getSimilar_for_Topics(model = word2vec, topicNumber = topicNum, topicModel = docsLSI, filePath = saveFileTo, logFile = logFile)
+
+
+    #word_analysis(textWords, topicWords)
+
+    #lsi.save(os.path.join(MODELS_DIR, "airCanada.lsi"))  # save model
     #lsi = models.LsiModel.load('/tmp/model.lsi')
 
-
-
-
 def main():
-    lda()
+    topic_analysis()
+
 
 if __name__ == "__main__": main()

@@ -73,6 +73,8 @@ def lda():
 
     # pre-processing
     trainingData = preprocessing(trainingDocs)
+    print()
+    print(trainingData)
     #testingData = preprocessing(testingDocs)
 
     MODELS_DIR = 'C:\\Users\\Norbert\\Desktop\\work\\Research 2016\\LDA_Models\\'

@@ -1,7 +1,7 @@
 from __future__ import print_function
 from gensim import corpora, models, matutils
 from nltk.stem.wordnet import WordNetLemmatizer
-from nltk.corpus import wordnet, stopwords
+from nltk.corpus import wordnet
 from stop_words import get_stop_words
 import re, nltk
 import numpy as np
@@ -71,6 +71,8 @@ def hdp():
 
     # generate LDA model
     hdp = models.HdpModel(corpus, dictionary)
+
+
     print("hdp")
     print(hdp.print_topics())
     print("hdp to lda")
