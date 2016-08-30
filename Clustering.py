@@ -77,11 +77,11 @@ def getWordDissimilarityMatrix(model, words):
         distMatrix.append(row)
 
     return distMatrix
-
-def clustering():
+    
+# e.g. data_file = "C:\\Users\\Norbert\\Desktop\\newest data\\Doc2Vec_Words.csv"
+def clustering(data_file):
     np.set_printoptions(precision=5, suppress=True)  # suppress scientific float notation
-    data_file = "C:\\Users\\Norbert\\Desktop\\newest data\\Doc2Vec_Words.csv"
-
+    
     wordSetArray = import_wordSets(data_file) # full vector spaces
     wordsArray = import_words(data_file) # unique words only; duplicate words from the file only show up once
 
@@ -157,6 +157,7 @@ def clustering():
             f.write('\n')
 
 def main():
-    clustering()
+    data_file = "C:\\Users\\Norbert\\Desktop\\newest data\\Doc2Vec_Words.csv"
+    clustering(data_file)
 
 if __name__ == "__main__": main()
