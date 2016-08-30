@@ -2,7 +2,7 @@ from __future__ import print_function
 from Clustering import getWordSimilarityMatrix, import_words
 import numpy as np
 import os, csv
-import gensim
+import gensim, sys
 from numpy import array
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
@@ -22,6 +22,64 @@ MODELS_DIR = 'C:\\Users\\Norbert\\Desktop\\work\\Research 2016\\LDA_Models\\'
 doc2vec =  gensim.models.Doc2Vec.load(os.path.join(MODELS_DIR, "docsAirCanada.doc2vec"))
 word2vec =  gensim.models.Word2Vec.load(os.path.join(MODELS_DIR, "docsAirCanada.word2vec"))
 
+def returnPositiveValues(myList):
+    return [elem for elem in myList if elem > 0]
+
+def cmdscale(dim , distMatrix):
+    """
+    Classical multidimensional scaling (MDS)
+
+    Parameters
+    ----------
+    D : (n, n) array
+        Symmetric distance matrix.
+
+    Returns
+    -------
+    Y : (n, p) array
+        Configuration matrix. Each column represents a dimension. Only the
+        p dimensions corresponding to positive eigenvalues of B are returned.
+        Note that each dimension is only determined up to an overall sign,
+        corresponding to a reflection.
+
+    e : (n,) array
+        Eigenvalues of B.
+
+    """
+    # Number of points
+    D = np.asarray(distMatrix)
+    n = len(D)
+
+    # Centering matrix
+    H = np.eye(n) - np.ones((n, n)) / n
+
+    # YY^T
+    B = -H.dot(D ** 2).dot(H) / 2
+
+    # Diagonalize
+    evals, evecs = np.linalg.eigh(B)
+
+    # Sort by eigenvalue in descending order
+    idx = np.argsort(evals)[::-1]
+    evals = evals[idx]
+    evecs = evecs[:, idx]
+
+    # Only keep dim number of eigenvalues and eigenvectors
+    evals = evals[:dim]
+    evecs = evecs[:, :dim]
+
+    #eval_diagmat = np.matrix(np.diag(np.sqrt(evals)))
+    #evecs = eval_diagmat * evecs.transpose()
+    #return (evecs.transpose(), evals)
+
+    # Compute the coordinates using positive-eigenvalued components only
+    w, = np.where(evals > 0)
+    L = np.diag(np.sqrt(evals[w]))
+    V = evecs[:, w]
+    Y = V.dot(L)
+
+    return Y, evals
+
 def screePlot(eigvals):
     fig = plt.figure(figsize=(8, 5))
     sing_vals = np.arange(len(eigvals)) + 1
@@ -37,7 +95,7 @@ def screePlot(eigvals):
     leg.draggable(state=True)
     plt.show()
 
-def multidimensionalScaling(wordDissimilarityMatrix, wordsList):
+def MDS1(wordDissimilarityMatrix, wordsList):
     # wordSimilarityMatrix contains only unique words only; duplicate words from the file only show up once
     seed = 2016
     n_samples = len(wordDissimilarityMatrix)
@@ -107,7 +165,7 @@ def multidimensionalScaling(wordDissimilarityMatrix, wordsList):
 
     plt.show()
 
-def multiDimensionalScaling2(wordDissimilarityMatrix, wordsList):
+def MDS2(wordDissimilarityMatrix, wordsList):
     mds = manifold.MDS(n_components=2, dissimilarity="precomputed", random_state=6)
     results = mds.fit(wordDissimilarityMatrix)
 
@@ -132,18 +190,17 @@ def multiDimensionalScaling2(wordDissimilarityMatrix, wordsList):
 
 def MDS(dimension, wordDissimilarityMatrix):
     seed = np.random.RandomState(seed=3)
-    mds = manifold.MDS(n_components=100, max_iter=3000, eps=1e-9,
+    mds = manifold.MDS(n_components = dimension, max_iter=3000, eps=1e-9,
                        random_state=seed, dissimilarity="precomputed", n_jobs=1)
 
     results = mds.fit(wordDissimilarityMatrix)
 
     coords = results.embedding_
 
-
 def main():
     wordsArray = import_words(data_file)  # unique words only; duplicate words from the file only show up once
     wordSimilarityMatrix = getWordSimilarityMatrix(doc2vec, wordsArray)
 
-    multiDimensionalScaling2(wordSimilarityMatrix, wordsArray)
+    cmdscale(10, wordSimilarityMatrix)
 
 if __name__ == "__main__": main()
